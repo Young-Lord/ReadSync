@@ -1,0 +1,7 @@
+{
+  "username": "a",
+  "password": "b",
+  "port": 8080,
+  "db_path": "data.db",
+  "base_url": ""
+}
