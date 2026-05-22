@@ -78,6 +78,11 @@ async function apiFetch(url, opts = {}) {
     showLogin();
     return null;
   }
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { const j = await res.json(); msg = j.error || msg; } catch {}
+    throw new Error(msg);
+  }
   return res.json();
 }
 
@@ -130,10 +135,12 @@ function goPage(p) {
 
 async function deleteEntry(id) {
   if (!confirm('确定删除此记录？')) return;
-  await fetch(`${API}/${id}`, {
-    method: 'DELETE',
-    headers: { 'Authorization': 'Basic ' + getAuth() }
-  });
+  try {
+    await apiFetch(`${API}/${id}`, { method: 'DELETE' });
+  } catch (e) {
+    alert('删除失败: ' + e.message);
+    return;
+  }
   loadEntries(currentPage, currentQuery);
   pollLatestID(); // 同步最新 ID，避免轮询误判
 }
@@ -156,7 +163,7 @@ document.getElementById('searchInput').addEventListener('input', function() {
 // --- 轮询自动刷新 ---
 let knownLatestID = null;
 let pollTimer = null;
-const POLL_INTERVAL = 30000; // 前台 30 秒
+const POLL_INTERVAL_MS = (typeof POLL_INTERVAL !== 'undefined' ? POLL_INTERVAL : 30000);
 
 async function pollLatestID() {
   const auth = getAuth();
@@ -179,7 +186,7 @@ async function pollLatestID() {
 
 function startPolling() {
   stopPolling();
-  pollTimer = setInterval(pollLatestID, POLL_INTERVAL);
+  pollTimer = setInterval(pollLatestID, POLL_INTERVAL_MS);
 }
 
 function stopPolling() {

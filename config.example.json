@@ -3,5 +3,8 @@
   "password": "b",
   "port": 8080,
   "db_path": "data.db",
-  "base_url": ""
+  "base_url": "",
+  "max_entries": 100000,
+  "dedupe_minutes": 10,
+  "poll_interval_ms": 30000
 }

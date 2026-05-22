@@ -22,11 +22,14 @@ import (
 var webuiFS embed.FS
 
 type Config struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Port     int    `json:"port"`
-	DBPath   string `json:"db_path"`
-	BaseURL  string `json:"base_url"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	Port           int    `json:"port"`
+	DBPath         string `json:"db_path"`
+	BaseURL        string `json:"base_url"`
+	MaxEntries     int    `json:"max_entries"`
+	DedupeMinutes  int    `json:"dedupe_minutes"`
+	PollIntervalMs int    `json:"poll_interval_ms"`
 }
 
 type Entry struct {
@@ -39,8 +42,6 @@ type Entry struct {
 var db *sql.DB
 var config Config
 var latestEntryID atomic.Int64
-
-const maxEntries = 100000
 
 func loadConfig(path string) Config {
 	var cfg Config
@@ -56,6 +57,15 @@ func loadConfig(path string) Config {
 	}
 	if cfg.DBPath == "" {
 		cfg.DBPath = "data.db"
+	}
+	if cfg.MaxEntries <= 0 {
+		cfg.MaxEntries = 100000
+	}
+	if cfg.DedupeMinutes <= 0 {
+		cfg.DedupeMinutes = 10
+	}
+	if cfg.PollIntervalMs <= 0 {
+		cfg.PollIntervalMs = 30000
 	}
 	return cfg
 }
@@ -114,27 +124,35 @@ func handlePostEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// Deduplication: if the latest entry has the same URL and was created recently, skip insert
 	var lastEntry Entry
 	var lastCreatedAt string
-	err := db.QueryRow("SELECT id, url, title, created_at FROM entries ORDER BY created_at DESC LIMIT 1").Scan(&lastEntry.ID, &lastEntry.URL, &lastEntry.Title, &lastCreatedAt)
+	err = tx.QueryRow("SELECT id, url, title, created_at FROM entries ORDER BY created_at DESC LIMIT 1").Scan(&lastEntry.ID, &lastEntry.URL, &lastEntry.Title, &lastCreatedAt)
 	if err == nil && lastEntry.URL == entry.URL {
 		t, parseErr := time.Parse(time.RFC3339, lastCreatedAt)
-		if parseErr == nil && time.Since(t) < 10*time.Minute {
+		if parseErr == nil && time.Since(t) < time.Duration(config.DedupeMinutes)*time.Minute {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(lastEntry)
 			return
 		}
 	}
 
+	// Eviction: if entries exceed max, delete the oldest 5%
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM entries").Scan(&count)
-	if count >= maxEntries {
-		deleteCount := int(math.Max(1, float64(maxEntries)*0.05))
-		_, err := db.Exec(
+	tx.QueryRow("SELECT COUNT(*) FROM entries").Scan(&count)
+	if count >= config.MaxEntries {
+		deleteCount := int(math.Max(1, float64(config.MaxEntries)*0.05))
+		if _, err := tx.Exec(
 			"DELETE FROM entries WHERE id IN (SELECT id FROM entries ORDER BY created_at ASC LIMIT ?)",
 			deleteCount,
-		)
-		if err != nil {
+		); err != nil {
 			http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
 			return
 		}
@@ -142,11 +160,16 @@ func handlePostEntry(w http.ResponseWriter, r *http.Request) {
 
 	entry.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 
-	result, err := db.Exec(
+	result, err := tx.Exec(
 		"INSERT INTO entries (url, title, created_at) VALUES (?, ?, ?)",
 		entry.URL, entry.Title, entry.CreatedAt,
 	)
 	if err != nil {
+		http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
 		http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
 		return
 	}
@@ -319,6 +342,7 @@ func main() {
 				return
 			}
 			content := strings.Replace(string(html), "<!--BASE_URL-->", base, 1)
+			content = strings.Replace(content, "<!--POLL_INTERVAL-->", strconv.Itoa(config.PollIntervalMs), 1)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte(content))
 			return
