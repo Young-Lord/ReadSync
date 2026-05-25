@@ -105,7 +105,6 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != config.Username || pass != config.Password {
-			w.Header().Set("WWW-Authenticate", `Basic realm="ReadSync"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}

@@ -34,30 +34,31 @@ function clearAuth() {
 }
 
 async function login() {
-  const u = document.getElementById('loginUser').value.trim();
-  const p = document.getElementById('loginPass').value;
+  let u = document.getElementById('loginUser').value.trim();
+  let p = document.getElementById('loginPass').value;
   const remember = document.getElementById('rememberMe').checked;
   const err = document.getElementById('loginError');
+  if (!u) {
+    const colonIdx = p.indexOf(':');
+    if (colonIdx !== -1) {
+      u = p.substring(0, colonIdx);
+      p = p.substring(colonIdx + 1);
+      document.getElementById('loginUser').value = u;
+      document.getElementById('loginPass').value = p;
+    }
+  }
   if (!u || !p) { err.textContent = '请输入用户名和密码'; return; }
   setAuth(u, p, remember);
+  err.textContent = '';
+  showApp();
   try {
-    const res = await fetch(API + '?page=1&per_page=1', {
-      headers: { 'Authorization': 'Basic ' + getAuth() }
-    });
-    if (res.status === 401) {
-      err.textContent = '用户名或密码错误';
-      clearAuth();
-      return;
-    }
-    err.textContent = '';
-    showApp();
-    loadEntries(1, '').then(() => {
-      pollLatestID();
-      startPolling();
-    });
+    await loadEntries(1, '');
+    pollLatestID();
+    startPolling();
   } catch (e) {
-    err.textContent = '连接失败: ' + e.message;
     clearAuth();
+    showLogin();
+    err.textContent = e.message === 'Unauthorized' ? '用户名或密码错误' : '连接失败: ' + e.message;
   }
 }
 
@@ -74,9 +75,7 @@ async function apiFetch(url, opts = {}) {
   }
   const res = await fetch(url, { ...opts, headers });
   if (res.status === 401) {
-    clearAuth();
-    showLogin();
-    return null;
+    throw new Error('Unauthorized');
   }
   if (!res.ok) {
     let msg = res.statusText;
@@ -94,7 +93,6 @@ async function loadEntries(page, query) {
   if (query) url += '&q=' + encodeURIComponent(query);
 
   const data = await apiFetch(url);
-  if (!data) return;
   if (!data.entries || data.entries.length === 0) {
     el.innerHTML = '<div class="empty">暂无记录</div>';
     document.getElementById('pagination').innerHTML = '';
@@ -130,7 +128,7 @@ function renderPagination(page, hasMore) {
 function goPage(p) {
   if (p < 1) return;
   currentPage = p;
-  loadEntries(p, currentQuery);
+  loadEntries(p, currentQuery).catch(() => {});
 }
 
 async function deleteEntry(id) {
@@ -210,9 +208,20 @@ const stored = getAuth();
 if (stored) {
   showApp();
   loadEntries(1, '').then(() => {
-    pollLatestID(); // 记录初始 latest_id
+    pollLatestID();
     startPolling();
+  }).catch(() => {
+    clearAuth();
+    showLogin();
   });
 } else {
   showLogin();
 }
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (event.reason?.message === 'Unauthorized') {
+    event.preventDefault();
+    clearAuth();
+    showLogin();
+  }
+});
