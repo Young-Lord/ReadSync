@@ -2,6 +2,7 @@ const API = (typeof BASE_URL !== 'undefined' ? BASE_URL : '') + '/api/v1/entry';
 let currentPage = 1;
 let currentQuery = '';
 let searchTimer = null;
+let deleteMode = false;
 
 function showLogin() {
   document.getElementById('loginOverlay').style.display = 'flex';
@@ -103,13 +104,13 @@ async function loadEntries(page, query) {
     const n = (page - 1) * 20 + i + 1;
     const time = new Date(e.created_at).toLocaleString('zh-CN');
     return `<div class="entry">
+      <input type="checkbox" class="delete-check" data-id="${e.id}" style="display:${deleteMode ? 'inline-block' : 'none'}">
       <div class="num">${n}</div>
       <div class="content">
         <div class="title"><a href="${e.url}" target="_blank">${escHtml(e.title || e.url)}</a></div>
         <div class="url">${escHtml(e.url)}</div>
         <div class="time">${time}</div>
       </div>
-      <div class="actions"><button class="danger" onclick="deleteEntry(${e.id})">删除</button></div>
     </div>`;
   }).join('');
 
@@ -131,16 +132,42 @@ function goPage(p) {
   loadEntries(p, currentQuery).catch(() => {});
 }
 
-async function deleteEntry(id) {
-  if (!confirm('确定删除此记录？')) return;
-  try {
-    await apiFetch(`${API}/${id}`, { method: 'DELETE' });
-  } catch (e) {
-    alert('删除失败: ' + e.message);
+function toggleDeleteMode() {
+  deleteMode = !deleteMode;
+  const btn = document.getElementById('deleteModeBtn');
+  const checks = document.querySelectorAll('.delete-check');
+  if (deleteMode) {
+    btn.textContent = '确认删除';
+    checks.forEach(c => c.style.display = 'inline-block');
+  } else {
+    btn.textContent = '删除';
+    checks.forEach(c => { c.style.display = 'none'; c.checked = false; });
+  }
+}
+
+async function confirmDelete() {
+  const checks = document.querySelectorAll('.delete-check:checked');
+  if (checks.length === 0) {
+    deleteMode = false;
+    const btn = document.getElementById('deleteModeBtn');
+    btn.textContent = '删除';
+    document.querySelectorAll('.delete-check').forEach(c => { c.style.display = 'none'; c.checked = false; });
     return;
   }
+  const ids = Array.from(checks).map(c => Number(c.dataset.id));
+  let failed = 0;
+  for (const id of ids) {
+    try {
+      await apiFetch(`${API}/${id}`, { method: 'DELETE' });
+    } catch {
+      failed++;
+    }
+  }
+  if (failed > 0) alert(`${failed} 条删除失败`);
+  deleteMode = false;
+  document.getElementById('deleteModeBtn').textContent = '删除';
   loadEntries(currentPage, currentQuery);
-  pollLatestID(); // 同步最新 ID，避免轮询误判
+  pollLatestID();
 }
 
 function escHtml(s) {

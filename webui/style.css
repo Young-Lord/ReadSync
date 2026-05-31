@@ -25,12 +25,17 @@ body {
 .login-error { color: #dc3545; font-size: 13px; margin-top: 8px; text-align: center; }
 .container { max-width: 900px; margin: 0 auto; }
 h1 { font-size: 24px; margin-bottom: 20px; color: #1a73e8; }
-.toolbar { margin-bottom: 16px; }
+h1 a { color: #1a73e8; text-decoration: none; }
+h1 a:hover { text-decoration: underline; }
+.nav-link { font-size: 16px; margin-left: 8px; opacity: 0.7; }
+.nav-link:hover { opacity: 1; }
+.toolbar { margin-bottom: 16px; display: flex; gap: 8px; }
 .toolbar input {
-  width: 100%; padding: 10px 12px; font-size: 14px;
+  flex: 1; padding: 10px 12px; font-size: 14px;
   border: 1px solid #ddd; border-radius: 4px;
 }
 .toolbar input:focus { border-color: #1a73e8; outline: none; }
+.toolbar button { white-space: nowrap; }
 button {
   padding: 8px 16px; font-size: 14px; border: none;
   border-radius: 4px; cursor: pointer; background: #1a73e8; color: #fff;
@@ -62,7 +67,9 @@ button.danger:hover { background: #c82333; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .entry .time { font-size: 11px; color: #999; }
-.entry .actions { flex-shrink: 0; padding-top: 2px; }
+.entry .delete-check {
+  flex-shrink: 0; margin-top: 6px; width: 16px; height: 16px; cursor: pointer;
+}
 .pagination {
   display: flex; justify-content: center; align-items: center;
   gap: 8px; margin-top: 16px; padding: 8px 0;
