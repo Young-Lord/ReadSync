@@ -163,6 +163,19 @@ func main() {
 		}
 		rPath = strings.TrimPrefix(rPath, "/")
 
+		if rPath == "sw.js" {
+			script, err := webuiFS.ReadFile("webui/sw.js")
+			if err != nil {
+				http.Error(w, "Internal error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			w.Header().Set("Service-Worker-Allowed", webPrefix)
+			w.Write(script)
+			return
+		}
+
 		if rPath == "" || rPath == "index.html" {
 			html, err := webuiFS.ReadFile("webui/index.html")
 			if err != nil {
