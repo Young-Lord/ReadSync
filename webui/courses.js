@@ -20,6 +20,15 @@ function setAuth(u, p, remember) {
 function getAuth() { return localStorage.getItem('readsync_auth') || sessionStorage.getItem('readsync_auth'); }
 function clearAuth() { localStorage.removeItem('readsync_auth'); sessionStorage.removeItem('readsync_auth'); }
 
+function handleAuthError(err) {
+  if (err?.message === 'Unauthorized') {
+    clearAuth();
+    showLogin();
+    return true;
+  }
+  return false;
+}
+
 async function login() {
   let u = document.getElementById('loginUser').value.trim();
   let p = document.getElementById('loginPass').value;
@@ -34,8 +43,12 @@ async function login() {
   err.textContent = '';
   showApp();
   try { await loadCourses(); } catch (e) {
-    clearAuth(); showLogin();
-    err.textContent = e.message === 'Unauthorized' ? '用户名或密码错误' : '连接失败: ' + e.message;
+    if (handleAuthError(e)) {
+      err.textContent = '用户名或密码错误';
+    } else {
+      showLogin();
+      err.textContent = '连接失败: ' + e.message;
+    }
   }
 }
 
@@ -187,7 +200,7 @@ async function deleteCourse(id, name) {
 const stored = getAuth();
 if (stored) {
   showApp();
-  loadCourses().catch(() => { clearAuth(); showLogin(); });
+  loadCourses().catch((e) => { handleAuthError(e); });
 } else {
   showLogin();
 }

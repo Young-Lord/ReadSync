@@ -1,4 +1,4 @@
-const CACHE_NAME = 'readsync-offline-v1';
+const CACHE_NAME = 'readsync-offline-v2';
 const OFFLINE_URL = new URL('offline.html', self.location.href).toString();
 const CONNECTIVITY_CHECK_HEADER = 'X-ReadSync-Connectivity-Check';
 
@@ -42,7 +42,7 @@ function fallbackOfflinePage() {
     })
     .then(function (response) {
       return response || new Response(
-        '<!doctype html><meta charset="utf-8"><title>ReadSync 离线</title><body>网络连接不可用，恢复后请刷新页面。</body>',
+        '<!doctype html><meta charset="utf-8"><title>ReadSync 离线</title><body>网络恢复后会自动刷新。</body>',
         { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
       );
     });

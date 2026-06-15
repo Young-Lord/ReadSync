@@ -34,6 +34,15 @@ function clearAuth() {
   sessionStorage.removeItem('readsync_auth');
 }
 
+function handleAuthError(err) {
+  if (err?.message === 'Unauthorized') {
+    clearAuth();
+    showLogin();
+    return true;
+  }
+  return false;
+}
+
 async function login() {
   let u = document.getElementById('loginUser').value.trim();
   let p = document.getElementById('loginPass').value;
@@ -57,9 +66,12 @@ async function login() {
     pollLatestID();
     startPolling();
   } catch (e) {
-    clearAuth();
-    showLogin();
-    err.textContent = e.message === 'Unauthorized' ? '用户名或密码错误' : '连接失败: ' + e.message;
+    if (handleAuthError(e)) {
+      err.textContent = '用户名或密码错误';
+    } else {
+      showLogin();
+      err.textContent = '连接失败: ' + e.message;
+    }
   }
 }
 
@@ -237,9 +249,8 @@ if (stored) {
   loadEntries(1, '').then(() => {
     pollLatestID();
     startPolling();
-  }).catch(() => {
-    clearAuth();
-    showLogin();
+  }).catch((e) => {
+    handleAuthError(e);
   });
 } else {
   showLogin();

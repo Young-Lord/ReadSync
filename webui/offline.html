@@ -36,12 +36,6 @@ p {
   color: #666;
   line-height: 1.6;
 }
-.status {
-  min-height: 20px;
-  margin-bottom: 16px;
-  color: #777;
-  font-size: 13px;
-}
 button {
   padding: 9px 16px;
   border: 0;
@@ -55,29 +49,23 @@ button:hover { background: #1557b0; }
 @media (prefers-color-scheme: dark) {
   body { background: #1a1a2e; color: #e0e0e0; }
   .offline-panel { background: #16213e; }
-  p, .status { color: #aaa; }
+  p { color: #aaa; }
 }
 </style>
 </head>
 <body>
 <main class="offline-panel">
   <h1>网络连接不可用</h1>
-  <p>ReadSync 暂时无法连接。页面会每 20 秒自动重试一次，连接恢复后会自动刷新。</p>
-  <div id="status" class="status">正在检查连接...</div>
+  <p>网络恢复后会自动刷新。</p>
   <button id="retryBtn" type="button">立即重试</button>
 </main>
 <script>
 (function () {
   const RETRY_MS = 20000;
   const CONNECTIVITY_CHECK_HEADER = 'X-ReadSync-Connectivity-Check';
-  const statusEl = document.getElementById('status');
   const retryBtn = document.getElementById('retryBtn');
   let retryTimer = null;
   let checking = false;
-
-  function setStatus(text) {
-    statusEl.textContent = text;
-  }
 
   function scheduleRetry() {
     clearTimeout(retryTimer);
@@ -88,7 +76,6 @@ button:hover { background: #1557b0; }
     if (checking) return;
     checking = true;
     clearTimeout(retryTimer);
-    setStatus('正在检查连接...');
 
     try {
       const response = await fetch(window.location.href, {
@@ -108,7 +95,6 @@ button:hover { background: #1557b0; }
       checking = false;
     }
 
-    setStatus('仍然无法连接，20 秒后重试');
     scheduleRetry();
   }
 
