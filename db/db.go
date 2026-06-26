@@ -88,10 +88,11 @@ func MatchAndStoreCourse(entryURL, entryTitle string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	rows, err := DB.Query("SELECT id, title_pattern, url_pattern FROM courses")
 	if err != nil {
+		log.Printf("MatchAndStoreCourse: query courses failed: %v", err)
 		return
 	}
-	defer rows.Close()
 
+	var matchedIDs []int64
 	for rows.Next() {
 		var courseID int64
 		var titlePat, urlPat string
@@ -111,10 +112,19 @@ func MatchAndStoreCourse(entryURL, entryTitle string) {
 			}
 		}
 		if matched {
-			DB.Exec(
-				"UPDATE courses SET latest_url = ?, latest_title = ?, updated_at = ? WHERE id = ?",
-				entryURL, entryTitle, now, courseID,
-			)
+			matchedIDs = append(matchedIDs, courseID)
+		}
+	}
+	// Close the read cursor before issuing writes: SQLite returns SQLITE_BUSY
+	// if we UPDATE while this query's rows are still open.
+	rows.Close()
+
+	for _, courseID := range matchedIDs {
+		if _, err := DB.Exec(
+			"UPDATE courses SET latest_url = ?, latest_title = ?, updated_at = ? WHERE id = ?",
+			entryURL, entryTitle, now, courseID,
+		); err != nil {
+			log.Printf("MatchAndStoreCourse: update course %d failed: %v", courseID, err)
 		}
 	}
 }
