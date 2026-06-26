@@ -3,6 +3,8 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"html"
 	"net/http"
 	"strconv"
 	"time"
@@ -131,5 +133,25 @@ func HandleCourseJump(w http.ResponseWriter, r *http.Request, shortID string) {
 		http.Error(w, "course has no progress yet", http.StatusNotFound)
 		return
 	}
-	http.Redirect(w, r, latestURL, http.StatusFound)
+
+	// Deliberately avoid http.Redirect / the Location header here. The upstream
+	// IIS ARR reverse proxy has "reverse rewrite host in response headers"
+	// enabled, which blindly replaces the host in Location with the proxy's own
+	// host, corrupting external targets (e.g. cs61b-2.gitbook.io -> gmis.sdgh.net).
+	// A body-based redirect is not rewritten by ARR.
+	urlAttr := html.EscapeString(latestURL)
+	urlJS, _ := json.Marshal(latestURL)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=%s">
+<title>跳转中…</title>
+<script>location.replace(%s);</script>
+</head>
+<body>正在跳转到 <a href="%s">%s</a>…</body>
+</html>`, urlAttr, string(urlJS), urlAttr, urlAttr)
 }
