@@ -119,8 +119,8 @@ func HandleDeleteCourse(w http.ResponseWriter, r *http.Request, idStr string) {
 }
 
 func HandleCourseJump(w http.ResponseWriter, r *http.Request, shortID string) {
-	var latestURL string
-	err := db.DB.QueryRow("SELECT latest_url FROM courses WHERE short_id = ?", shortID).Scan(&latestURL)
+	var latestURL, latestTitle string
+	err := db.DB.QueryRow("SELECT latest_url, latest_title FROM courses WHERE short_id = ?", shortID).Scan(&latestURL, &latestTitle)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "course not found", http.StatusNotFound)
@@ -134,6 +134,10 @@ func HandleCourseJump(w http.ResponseWriter, r *http.Request, shortID string) {
 		return
 	}
 
+	if latestTitle == "" {
+		latestTitle = latestURL
+	}
+
 	// Deliberately avoid http.Redirect / the Location header here. The upstream
 	// IIS ARR reverse proxy has "reverse rewrite host in response headers"
 	// enabled, which blindly replaces the host in Location with the proxy's own
@@ -141,6 +145,7 @@ func HandleCourseJump(w http.ResponseWriter, r *http.Request, shortID string) {
 	// A body-based redirect is not rewritten by ARR.
 	urlAttr := html.EscapeString(latestURL)
 	urlJS, _ := json.Marshal(latestURL)
+	titleText := html.EscapeString(latestTitle)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -149,9 +154,9 @@ func HandleCourseJump(w http.ResponseWriter, r *http.Request, shortID string) {
 <head>
 <meta charset="utf-8">
 <meta http-equiv="refresh" content="0; url=%s">
-<title>跳转中…</title>
+<title>%s</title>
 <script>location.replace(%s);</script>
 </head>
-<body>正在跳转到 <a href="%s">%s</a>…</body>
-</html>`, urlAttr, string(urlJS), urlAttr, urlAttr)
+<body>正在跳转到 <a href="%s">%s</a></body>
+</html>`, urlAttr, titleText, string(urlJS), urlAttr, titleText)
 }
