@@ -16,7 +16,10 @@ var LatestEntryID atomic.Int64
 
 func Init(path string, maxEntries int) {
 	var err error
-	DB, err = sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
+	// modernc.org/sqlite ignores mattn-style DSN params (_journal_mode/_busy_timeout),
+	// so use its _pragma form; otherwise WAL and the busy timeout never take effect
+	// and concurrent writes fail with SQLITE_BUSY.
+	DB, err = sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}

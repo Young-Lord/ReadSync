@@ -49,7 +49,7 @@ func loadConfig(path string) models.Config {
 func makeEntryAPIHandler(apiPrefix string, entryH *handlers.EntryHandlers) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 
 		if r.Method == http.MethodOptions {
@@ -62,6 +62,10 @@ func makeEntryAPIHandler(apiPrefix string, entryH *handlers.EntryHandlers) http.
 
 		if r.Method == http.MethodPost && path == "" {
 			entryH.HandlePostEntry(w, r)
+			return
+		}
+		if r.Method == http.MethodPatch && path == "" {
+			entryH.HandlePatchEntryTitle(w, r)
 			return
 		}
 		if r.Method == http.MethodGet && path == "" {

@@ -6,6 +6,7 @@ A self-hosted browsing history synchronization tool. It consists of a Go backend
 
 - Automatic browsing history recording via browser userscript
 - SPA navigation support (pushState / replaceState / popstate)
+- Live page title tracking: title changes are synced and refresh the current entry (visible via auto-refresh)
 - Deduplication: same URL within a configurable time window is not recorded again
 - Full-text search on URL and title
 - Paginated browsing history with auto-refresh polling
@@ -85,6 +86,7 @@ All endpoints require HTTP Basic Auth.
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/v1/entry` | Create a new entry (`{"url": "...", "title": "..."}`) |
+| `PATCH` | `/api/v1/entry` | Report a title change (`{"url": "...", "title": "..."}`); if the latest entry has this URL its title is updated and `latest-id` advances (so the UI refreshes), otherwise a new entry is inserted |
 | `GET` | `/api/v1/entry?page=1&per_page=20&q=keyword` | List entries (paginated, searchable) |
 | `DELETE` | `/api/v1/entry/{id}` | Delete an entry by ID |
 | `GET` | `/api/v1/entry/latest-id` | Get the latest entry ID (used for polling) |
