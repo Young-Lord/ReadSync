@@ -106,7 +106,7 @@ function directInstallScript() {
   const scriptURL = getScriptInstallURL();
   const tokenAPI = (typeof BASE_URL !== 'undefined' ? BASE_URL : '') + '/api/v1/userscript/token';
   setInstallStatus('正在获取安装令牌...', false);
-  apiFetch(tokenAPI, { method: 'POST' }).then(function(data) {
+  apiFetch(tokenAPI, { method: 'POST', body: '{}' }).then(function(data) {
     const installURL = window.location.origin + scriptURL + '?token=' + data.token;
     setInstallStatus('安装窗口已打开，请确认 Tampermonkey 的安装提示。', false);
     // 在新标签页打开 .user.js 链接，Tampermonkey 会自动检测并提示安装
