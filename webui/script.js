@@ -86,22 +86,41 @@ function getScriptInstallURL() {
 
 function openScriptInstall() {
   const scriptURL = getScriptInstallURL();
-  document.getElementById('directInstallLink').href = scriptURL;
   document.getElementById('scriptUrlDisplay').textContent = window.location.origin + scriptURL;
   document.getElementById('scriptInstallOverlay').style.display = 'flex';
+  document.getElementById('installStatusMsg').textContent = '';
+  document.getElementById('installStatusMsg').className = 'install-status';
 }
 
 function closeScriptInstall() {
   document.getElementById('scriptInstallOverlay').style.display = 'none';
-  document.getElementById('copySuccessMsg').style.display = 'none';
+}
+
+function setInstallStatus(text, isError) {
+  const msg = document.getElementById('installStatusMsg');
+  msg.textContent = text;
+  msg.className = 'install-status' + (isError ? ' install-error' : ' install-success');
+}
+
+function directInstallScript() {
+  const scriptURL = getScriptInstallURL();
+  const tokenAPI = (typeof BASE_URL !== 'undefined' ? BASE_URL : '') + '/api/v1/userscript/token';
+  setInstallStatus('正在获取安装令牌...', false);
+  apiFetch(tokenAPI, { method: 'POST' }).then(function(data) {
+    const installURL = window.location.origin + scriptURL + '?token=' + data.token;
+    setInstallStatus('安装窗口已打开，请确认 Tampermonkey 的安装提示。', false);
+    // 在新标签页打开 .user.js 链接，Tampermonkey 会自动检测并提示安装
+    window.open(installURL, '_blank');
+    closeScriptInstall();
+  }).catch(function(err) {
+    setInstallStatus('安装失败: ' + err.message, true);
+  });
 }
 
 function copyScriptLink() {
   const scriptURL = window.location.origin + getScriptInstallURL();
   navigator.clipboard.writeText(scriptURL).then(function() {
-    const msg = document.getElementById('copySuccessMsg');
-    msg.style.display = 'block';
-    setTimeout(function() { msg.style.display = 'none'; }, 2000);
+    setInstallStatus('脚本链接已复制到剪贴板 ✓', false);
   }).catch(function() {
     // 回退方案：选中显示区域
     const display = document.getElementById('scriptUrlDisplay');
@@ -110,6 +129,7 @@ function copyScriptLink() {
     const selection = window.getSelection();
     selection.removeAllRanges();
     selection.addRange(range);
+    setInstallStatus('请手动复制上方链接', false);
   });
 }
 
@@ -124,6 +144,7 @@ document.getElementById('loginPass').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') login();
 });
 document.getElementById('installScriptBtn').addEventListener('click', openScriptInstall);
+document.getElementById('directInstallBtn').addEventListener('click', directInstallScript);
 document.getElementById('copyScriptLinkBtn').addEventListener('click', copyScriptLink);
 
 async function apiFetch(url, opts = {}) {

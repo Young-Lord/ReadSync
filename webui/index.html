@@ -35,12 +35,12 @@
     <h2>安装 ReadSync 用户脚本</h2>
     <p class="modal-desc">用户脚本可以自动将浏览的页面同步到 ReadSync 服务器。请在浏览器中安装 <a href="https://www.tampermonkey.net/" target="_blank">Tampermonkey</a> 扩展后，点击下方按钮安装。</p>
     <div class="script-install-actions">
-      <a id="directInstallLink" class="btn-primary" target="_blank" onclick="closeScriptInstall()">一键安装脚本</a>
+      <button id="directInstallBtn" class="btn-primary">一键安装脚本</button>
       <button id="copyScriptLinkBtn" class="btn-secondary">复制脚本链接</button>
     </div>
-    <div id="copySuccessMsg" class="copy-success" style="display:none">已复制到剪贴板</div>
+    <div id="installStatusMsg" class="install-status"></div>
     <div class="manual-install">
-      <p class="manual-hint">提示：如果一键安装没有自动触发，请复制以下链接并在浏览器新标签页中打开：</p>
+      <p class="manual-hint">提示：如果自动安装未触发，请尝试复制脚本链接并在新标签页中粘贴打开：</p>
       <div class="script-url-display" id="scriptUrlDisplay"></div>
     </div>
     <button class="btn-close" onclick="closeScriptInstall()">关闭</button>

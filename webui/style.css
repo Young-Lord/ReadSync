@@ -205,3 +205,12 @@ button.danger:hover { background: #c82333; }
 .btn-close:hover {
   background: #d0d0d0;
 }
+.install-status {
+  text-align: center;
+  font-size: 13px;
+  margin-bottom: 12px;
+  min-height: 20px;
+  line-height: 1.5;
+}
+.install-success { color: #2e7d32; }
+.install-error { color: #dc3545; }

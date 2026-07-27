@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -11,6 +13,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"readsync/db"
 	"readsync/handlers"
@@ -19,6 +23,45 @@ import (
 
 //go:embed webui/*
 var webuiFS embed.FS
+
+// installTokenStore 管理一次性安装令牌及其对应的预生成脚本内容。
+// 前端 POST 换取令牌时，服务端已用用户的认证凭据生成了完整脚本。
+type installTokenStore struct {
+	mu     sync.RWMutex
+	tokens map[string]string // token -> pre-generated script content
+}
+
+var installTokens = &installTokenStore{
+	tokens: make(map[string]string),
+}
+
+const installTokenTTL = 5 * time.Minute
+
+func (s *installTokenStore) generate(scriptContent string) string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	token := hex.EncodeToString(b)
+	s.mu.Lock()
+	s.tokens[token] = scriptContent
+	s.mu.Unlock()
+	// 异步清理：5 分钟后自动过期
+	time.AfterFunc(installTokenTTL, func() {
+		s.mu.Lock()
+		delete(s.tokens, token)
+		s.mu.Unlock()
+	})
+	return token
+}
+
+func (s *installTokenStore) consume(token string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	content, ok := s.tokens[token]
+	if ok {
+		delete(s.tokens, token)
+	}
+	return content, ok
+}
 
 func loadConfig(path string) models.Config {
 	var cfg models.Config
@@ -121,53 +164,93 @@ func makeCourseAPIHandler(apiPrefix string) http.HandlerFunc {
 	}
 }
 
-// makeUserscriptHandler 生成一个动态的用户脚本，其中嵌入用户的认证凭据和服务端地址。
+// generateUserscriptContent 读取模板并用用户凭据填充占位符，返回完整的 .user.js 内容。
+func generateUserscriptContent(user, pass, base string, r *http.Request) (string, error) {
+	template, err := webuiFS.ReadFile("webui/userscript.template.js")
+	if err != nil {
+		return "", err
+	}
+
+	// 确定服务端 URL（考虑反向代理的情况）
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd == "https" || fwd == "https,http" {
+		scheme = "https"
+	}
+	serverURL := fmt.Sprintf("%s://%s%s", scheme, r.Host, strings.TrimSuffix(base, "/"))
+
+	// 提取 hostname（去掉端口）用于 @connect
+	host := r.Host
+	if colonIdx := strings.LastIndex(host, ":"); colonIdx != -1 {
+		portStr := host[colonIdx+1:]
+		if _, err := strconv.Atoi(portStr); err == nil {
+			host = host[:colonIdx]
+		}
+	}
+	host = strings.Trim(host, "[]")
+
+	authToken := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+
+	content := string(template)
+	content = strings.ReplaceAll(content, "<!--CONNECT_HOST-->", host)
+	content = strings.ReplaceAll(content, "<!--SERVER_URL-->", serverURL)
+	content = strings.ReplaceAll(content, "<!--AUTH_TOKEN-->", authToken)
+	return content, nil
+}
+
+// makeUserscriptHandler 生成动态用户脚本。
+// Basic Auth → 实时生成。?token=xxx → 从令牌存储中取出预生成内容。
 func makeUserscriptHandler(base string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if ok {
+			content, err := generateUserscriptContent(user, pass, base, r)
+			if err != nil {
+				http.Error(w, "Internal error", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Write([]byte(content))
+			return
+		}
+
+		// 令牌认证：取出预生成脚本
+		token := r.URL.Query().Get("token")
+		content, ok := installTokens.consume(token)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write([]byte(content))
+	}
+}
+
+// makeInstallTokenHandler 处理 POST /token 请求。
+// 已在 AuthMiddleware 中通过 Basic Auth 验证，此处预生成完整脚本并存入令牌存储。
+func makeInstallTokenHandler(base string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+			return
+		}
 		user, pass, ok := r.BasicAuth()
 		if !ok {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-
-		template, err := webuiFS.ReadFile("webui/userscript.template.js")
+		content, err := generateUserscriptContent(user, pass, base, r)
 		if err != nil {
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
 		}
-
-		// 确定服务端 URL（考虑反向代理的情况）
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		if fwd := r.Header.Get("X-Forwarded-Proto"); fwd == "https" || fwd == "https,http" {
-			scheme = "https"
-		}
-		serverURL := fmt.Sprintf("%s://%s%s", scheme, r.Host, strings.TrimSuffix(base, "/"))
-
-		// 提取 hostname（去掉端口）用于 @connect
-		host := r.Host
-		if colonIdx := strings.LastIndex(host, ":"); colonIdx != -1 {
-			// 检测是否真的是端口（IPv6 地址可能包含冒号）
-			portStr := host[colonIdx+1:]
-			if _, err := strconv.Atoi(portStr); err == nil {
-				host = host[:colonIdx]
-			}
-		}
-		// IPv6 地址去掉方括号
-		host = strings.Trim(host, "[]")
-
-		authToken := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
-
-		content := string(template)
-		content = strings.ReplaceAll(content, "<!--CONNECT_HOST-->", host)
-		content = strings.ReplaceAll(content, "<!--SERVER_URL-->", serverURL)
-		content = strings.ReplaceAll(content, "<!--AUTH_TOKEN-->", authToken)
-
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Write([]byte(content))
+		token := installTokens.generate(content)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": token})
 	}
 }
 
@@ -205,10 +288,14 @@ func main() {
 		handlers.HandleCourseJump(w, r, shortID)
 	})
 
-	// 用户脚本安装路由 — 需认证，动态注入用户的 SERVER_URL 和 AUTH
+	// 用户脚本安装路由 — 无需 AuthMiddleware，处理器内自行判断 Basic Auth 或 ?token=
 	userscriptPrefix := base + "/userscript.user.js"
-	authUserscript := handlers.AuthMiddleware(makeUserscriptHandler(base), config.Username, config.Password)
-	mux.HandleFunc(userscriptPrefix, authUserscript)
+	mux.HandleFunc(userscriptPrefix, makeUserscriptHandler(base))
+
+	// 安装令牌 API — AuthMiddleware 保护，只允许 POST
+	tokenAPIPrefix := base + "/api/v1/userscript/token"
+	authTokenAPI := handlers.AuthMiddleware(makeInstallTokenHandler(base), config.Username, config.Password)
+	mux.HandleFunc(tokenAPIPrefix, authTokenAPI)
 
 	webPrefix := base + "/"
 	webFS, err := fs.Sub(webuiFS, "webui")
