@@ -20,13 +20,31 @@
   </div>
 </div>
 <div class="container" id="mainApp" style="display:none">
-  <h1><a href="index.html">ReadSync</a> <a href="courses.html" class="nav-link">课程</a></h1>
+  <h1><a href="index.html">ReadSync</a> <a href="courses.html" class="nav-link">课程</a> <a href="javascript:void(0)" class="nav-link" id="installScriptBtn">安装脚本</a></h1>
   <div class="toolbar">
     <input type="text" id="searchInput" placeholder="搜索标题或 URL...">
     <button id="deleteModeBtn" class="danger" onclick="deleteMode ? confirmDelete() : toggleDeleteMode()">删除</button>
   </div>
   <div id="entries" class="entries"></div>
   <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- 用户脚本安装弹窗 -->
+<div id="scriptInstallOverlay" class="overlay" style="display:none">
+  <div class="modal-box">
+    <h2>安装 ReadSync 用户脚本</h2>
+    <p class="modal-desc">用户脚本可以自动将浏览的页面同步到 ReadSync 服务器。请在浏览器中安装 <a href="https://www.tampermonkey.net/" target="_blank">Tampermonkey</a> 扩展后，点击下方按钮安装。</p>
+    <div class="script-install-actions">
+      <a id="directInstallLink" class="btn-primary" target="_blank" onclick="closeScriptInstall()">一键安装脚本</a>
+      <button id="copyScriptLinkBtn" class="btn-secondary">复制脚本链接</button>
+    </div>
+    <div id="copySuccessMsg" class="copy-success" style="display:none">已复制到剪贴板</div>
+    <div class="manual-install">
+      <p class="manual-hint">提示：如果一键安装没有自动触发，请复制以下链接并在浏览器新标签页中打开：</p>
+      <div class="script-url-display" id="scriptUrlDisplay"></div>
+    </div>
+    <button class="btn-close" onclick="closeScriptInstall()">关闭</button>
+  </div>
 </div>
 <script src="script.js"></script>
 </body>

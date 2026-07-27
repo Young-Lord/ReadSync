@@ -2,13 +2,18 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"readsync/db"
+	"readsync/models"
 )
 
 func callEntry(h func(http.ResponseWriter, *http.Request), method, body string) *httptest.ResponseRecorder {
@@ -97,6 +102,85 @@ func TestHandlePatchEntryTitle(t *testing.T) {
 	// A missing URL is rejected.
 	if rec := callEntry(h.HandlePatchEntryTitle, http.MethodPatch, `{"title":"no url"}`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("patch without url: expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandleGetEntriesUsesFTSAndCursorPagination(t *testing.T) {
+	db.Init(filepath.Join(t.TempDir(), "data.db"), 100000)
+	defer db.DB.Close()
+
+	for entryIndex := 1; entryIndex <= 5; entryIndex++ {
+		createdAt := fmt.Sprintf("2026-07-27T12:00:%02dZ", entryIndex)
+		title := fmt.Sprintf("SQLite search result %d", entryIndex)
+		if entryIndex == 3 {
+			title = "unrelated entry"
+		}
+		if _, err := db.DB.Exec(
+			"INSERT INTO entries (url, title, created_at) VALUES (?, ?, ?)",
+			fmt.Sprintf("https://example.com/articles/%d", entryIndex), title, createdAt,
+		); err != nil {
+			t.Fatalf("seed entry %d: %v", entryIndex, err)
+		}
+	}
+
+	firstRequest := httptest.NewRequest(http.MethodGet, "/api/v1/entry?per_page=2&q=search", nil)
+	firstRecorder := httptest.NewRecorder()
+	HandleGetEntries(firstRecorder, firstRequest)
+	if firstRecorder.Code != http.StatusOK {
+		t.Fatalf("first page: got %d, body %s", firstRecorder.Code, firstRecorder.Body.String())
+	}
+
+	var firstPage struct {
+		Entries    []models.Entry `json:"entries"`
+		HasMore    bool           `json:"has_more"`
+		NextCursor struct {
+			CreatedAt string `json:"created_at"`
+			ID        int64  `json:"id"`
+		} `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(firstRecorder.Body.Bytes(), &firstPage); err != nil {
+		t.Fatalf("decode first page: %v", err)
+	}
+	if len(firstPage.Entries) != 2 || !firstPage.HasMore {
+		t.Fatalf("first page: expected 2 entries and more results, got %d and has_more=%v", len(firstPage.Entries), firstPage.HasMore)
+	}
+	if firstPage.Entries[0].Title != "SQLite search result 5" || firstPage.Entries[1].Title != "SQLite search result 4" {
+		t.Fatalf("first page returned unexpected titles: %#v", firstPage.Entries)
+	}
+
+	secondURL := "/api/v1/entry?per_page=2&q=search&cursor_created_at=" + url.QueryEscape(firstPage.NextCursor.CreatedAt) +
+		"&cursor_id=" + strconv.FormatInt(firstPage.NextCursor.ID, 10)
+	secondRequest := httptest.NewRequest(http.MethodGet, secondURL, nil)
+	secondRecorder := httptest.NewRecorder()
+	HandleGetEntries(secondRecorder, secondRequest)
+	if secondRecorder.Code != http.StatusOK {
+		t.Fatalf("second page: got %d, body %s", secondRecorder.Code, secondRecorder.Body.String())
+	}
+
+	var secondPage struct {
+		Entries []models.Entry `json:"entries"`
+		HasMore bool           `json:"has_more"`
+	}
+	if err := json.Unmarshal(secondRecorder.Body.Bytes(), &secondPage); err != nil {
+		t.Fatalf("decode second page: %v", err)
+	}
+	if len(secondPage.Entries) != 2 || secondPage.HasMore {
+		t.Fatalf("second page: expected final 2 entries, got %d and has_more=%v", len(secondPage.Entries), secondPage.HasMore)
+	}
+	if secondPage.Entries[0].Title != "SQLite search result 2" || secondPage.Entries[1].Title != "SQLite search result 1" {
+		t.Fatalf("second page returned unexpected titles: %#v", secondPage.Entries)
+	}
+}
+
+func TestHandleGetEntriesRejectsShortSearch(t *testing.T) {
+	db.Init(filepath.Join(t.TempDir(), "data.db"), 100000)
+	defer db.DB.Close()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/entry?q=ab", nil)
+	recorder := httptest.NewRecorder()
+	HandleGetEntries(recorder, request)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d, body %s", recorder.Code, recorder.Body.String())
 	}
 }
 

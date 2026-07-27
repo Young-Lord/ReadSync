@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -120,6 +121,56 @@ func makeCourseAPIHandler(apiPrefix string) http.HandlerFunc {
 	}
 }
 
+// makeUserscriptHandler 生成一个动态的用户脚本，其中嵌入用户的认证凭据和服务端地址。
+func makeUserscriptHandler(base string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		template, err := webuiFS.ReadFile("webui/userscript.template.js")
+		if err != nil {
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+
+		// 确定服务端 URL（考虑反向代理的情况）
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		if fwd := r.Header.Get("X-Forwarded-Proto"); fwd == "https" || fwd == "https,http" {
+			scheme = "https"
+		}
+		serverURL := fmt.Sprintf("%s://%s%s", scheme, r.Host, strings.TrimSuffix(base, "/"))
+
+		// 提取 hostname（去掉端口）用于 @connect
+		host := r.Host
+		if colonIdx := strings.LastIndex(host, ":"); colonIdx != -1 {
+			// 检测是否真的是端口（IPv6 地址可能包含冒号）
+			portStr := host[colonIdx+1:]
+			if _, err := strconv.Atoi(portStr); err == nil {
+				host = host[:colonIdx]
+			}
+		}
+		// IPv6 地址去掉方括号
+		host = strings.Trim(host, "[]")
+
+		authToken := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+
+		content := string(template)
+		content = strings.ReplaceAll(content, "<!--CONNECT_HOST-->", host)
+		content = strings.ReplaceAll(content, "<!--SERVER_URL-->", serverURL)
+		content = strings.ReplaceAll(content, "<!--AUTH_TOKEN-->", authToken)
+
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write([]byte(content))
+	}
+}
+
 func main() {
 	config := loadConfig("config.json")
 	db.Init(config.DBPath, config.MaxEntries)
@@ -153,6 +204,11 @@ func main() {
 		}
 		handlers.HandleCourseJump(w, r, shortID)
 	})
+
+	// 用户脚本安装路由 — 需认证，动态注入用户的 SERVER_URL 和 AUTH
+	userscriptPrefix := base + "/userscript.user.js"
+	authUserscript := handlers.AuthMiddleware(makeUserscriptHandler(base), config.Username, config.Password)
+	mux.HandleFunc(userscriptPrefix, authUserscript)
 
 	webPrefix := base + "/"
 	webFS, err := fs.Sub(webuiFS, "webui")
@@ -218,11 +274,13 @@ func main() {
 		log.Printf("Web UI:  http://localhost%s/", addr)
 		log.Printf("API:     http://localhost%s/api/v1/entry", addr)
 		log.Printf("Courses: http://localhost%s/courses.html", addr)
+		log.Printf("Userscript: http://localhost%s/userscript.user.js", addr)
 		log.Printf("Jump:    http://localhost%s/course/jump/<short_id>", addr)
 	} else {
 		log.Printf("Web UI:  http://localhost%s%s/", addr, base)
 		log.Printf("API:     http://localhost%s%s/api/v1/entry", addr, base)
 		log.Printf("Courses: http://localhost%s%s/courses.html", addr, base)
+		log.Printf("Userscript: http://localhost%s%s/userscript.user.js", addr, base)
 		log.Printf("Jump:    http://localhost%s%s/course/jump/<short_id>", addr, base)
 	}
 	if err := http.ListenAndServe(addr, mux); err != nil {

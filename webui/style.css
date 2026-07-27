@@ -90,4 +90,118 @@ button.danger:hover { background: #c82333; }
   .entry .num { color: #666; }
   .entry .time { color: #666; }
   .pagination span { color: #999; }
+  .modal-box { background: #16213e; }
+  .modal-desc a { color: #64b5f6; }
+  .modal-desc { color: #ccc; }
+  .script-url-display { background: #1a1a2e; border-color: #333; color: #64b5f6; }
+  .copy-success { color: #66bb6a; }
+  .manual-hint { color: #999; }
+  .btn-secondary { background: #2a2a4a; color: #e0e0e0; }
+  .btn-secondary:hover { background: #3a3a5a; }
+}
+
+/* --- 用户脚本安装弹窗 --- */
+.modal-box {
+  background: #fff;
+  padding: 32px;
+  border-radius: 8px;
+  width: 520px;
+  max-width: 90vw;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+  position: relative;
+}
+.modal-box h2 {
+  margin-bottom: 16px;
+  font-size: 20px;
+  text-align: center;
+  color: #1a73e8;
+}
+.modal-desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #555;
+  margin-bottom: 20px;
+}
+.modal-desc a {
+  color: #1a73e8;
+  text-decoration: underline;
+}
+.script-install-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  justify-content: center;
+}
+.btn-primary {
+  display: inline-block;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #1a73e8;
+  color: #fff;
+  text-decoration: none;
+  text-align: center;
+}
+.btn-primary:hover {
+  background: #1557b0;
+  text-decoration: none;
+}
+.btn-secondary {
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #e8e8e8;
+  color: #333;
+  text-align: center;
+}
+.btn-secondary:hover {
+  background: #d0d0d0;
+}
+.copy-success {
+  text-align: center;
+  font-size: 13px;
+  color: #2e7d32;
+  margin-bottom: 12px;
+}
+.manual-install {
+  margin-bottom: 16px;
+}
+.manual-hint {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.script-url-display {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  word-break: break-all;
+  color: #1a73e8;
+  user-select: all;
+}
+.btn-close {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  background: #e8e8e8;
+  color: #333;
+  text-align: center;
+  margin-top: 8px;
+}
+.btn-close:hover {
+  background: #d0d0d0;
 }

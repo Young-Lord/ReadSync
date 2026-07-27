@@ -2,6 +2,10 @@ const API = (typeof BASE_URL !== 'undefined' ? BASE_URL : '') + '/api/v1/entry';
 let currentPage = 1;
 let currentQuery = '';
 let searchTimer = null;
+let entriesRequestController = null;
+let entriesRequestSequence = 0;
+let pageCursors = new Map([[1, null]]);
+const MIN_SEARCH_LENGTH = 3;
 let deleteMode = false;
 
 function showLogin() {
@@ -75,10 +79,52 @@ async function login() {
   }
 }
 
+// --- 用户脚本安装弹窗 ---
+function getScriptInstallURL() {
+  return (typeof BASE_URL !== 'undefined' ? BASE_URL : '') + '/userscript.user.js';
+}
+
+function openScriptInstall() {
+  const scriptURL = getScriptInstallURL();
+  document.getElementById('directInstallLink').href = scriptURL;
+  document.getElementById('scriptUrlDisplay').textContent = window.location.origin + scriptURL;
+  document.getElementById('scriptInstallOverlay').style.display = 'flex';
+}
+
+function closeScriptInstall() {
+  document.getElementById('scriptInstallOverlay').style.display = 'none';
+  document.getElementById('copySuccessMsg').style.display = 'none';
+}
+
+function copyScriptLink() {
+  const scriptURL = window.location.origin + getScriptInstallURL();
+  navigator.clipboard.writeText(scriptURL).then(function() {
+    const msg = document.getElementById('copySuccessMsg');
+    msg.style.display = 'block';
+    setTimeout(function() { msg.style.display = 'none'; }, 2000);
+  }).catch(function() {
+    // 回退方案：选中显示区域
+    const display = document.getElementById('scriptUrlDisplay');
+    const range = document.createRange();
+    range.selectNodeContents(display);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+}
+
+// 点击遮罩层关闭弹窗
+document.getElementById('scriptInstallOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeScriptInstall();
+});
+
+// --- 事件监听初始化 ---
 document.getElementById('loginBtn').addEventListener('click', login);
 document.getElementById('loginPass').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') login();
 });
+document.getElementById('installScriptBtn').addEventListener('click', openScriptInstall);
+document.getElementById('copyScriptLinkBtn').addEventListener('click', copyScriptLink);
 
 async function apiFetch(url, opts = {}) {
   const headers = opts.headers || {};
@@ -99,34 +145,54 @@ async function apiFetch(url, opts = {}) {
 }
 
 async function loadEntries(page, query) {
-  const el = document.getElementById('entries');
-  el.innerHTML = '<div class="loading">加载中...</div>';
+  const cursor = pageCursors.get(page);
+  if (page > 1 && !cursor) return;
 
-  let url = `${API}?page=${page}&per_page=20`;
-  if (query) url += '&q=' + encodeURIComponent(query);
+  if (entriesRequestController) entriesRequestController.abort();
+  entriesRequestController = new AbortController();
+  const requestSequence = ++entriesRequestSequence;
+  const entriesElement = document.getElementById('entries');
+  entriesElement.innerHTML = '<div class="loading">加载中...</div>';
 
-  const data = await apiFetch(url);
-  if (!data.entries || data.entries.length === 0) {
-    el.innerHTML = '<div class="empty">暂无记录</div>';
-    document.getElementById('pagination').innerHTML = '';
-    return;
+  const parameters = new URLSearchParams({ per_page: '20' });
+  if (query) parameters.set('q', query);
+  if (cursor) {
+    parameters.set('cursor_created_at', cursor.created_at);
+    parameters.set('cursor_id', String(cursor.id));
   }
 
-  el.innerHTML = data.entries.map((e, i) => {
-    const n = (page - 1) * 20 + i + 1;
-    const time = new Date(e.created_at).toLocaleString('zh-CN');
-    return `<div class="entry">
-      <input type="checkbox" class="delete-check" data-id="${e.id}" style="display:${deleteMode ? 'inline-block' : 'none'}">
-      <div class="num">${n}</div>
-      <div class="content">
-        <div class="title"><a href="${e.url}" target="_blank">${escHtml(e.title || e.url)}</a></div>
-        <div class="url">${escHtml(e.url)}</div>
-        <div class="time">${time}</div>
-      </div>
-    </div>`;
-  }).join('');
+  try {
+    const data = await apiFetch(`${API}?${parameters}`, { signal: entriesRequestController.signal });
+    if (requestSequence !== entriesRequestSequence) return;
 
-  renderPagination(data.page, data.has_more);
+    if (!data.entries || data.entries.length === 0) {
+      entriesElement.innerHTML = '<div class="empty">暂无记录</div>';
+      renderPagination(page, false);
+      return;
+    }
+
+    if (data.next_cursor) pageCursors.set(page + 1, data.next_cursor);
+    else pageCursors.delete(page + 1);
+
+    entriesElement.innerHTML = data.entries.map((entry, index) => {
+      const entryNumber = (page - 1) * 20 + index + 1;
+      const entryTime = new Date(entry.created_at).toLocaleString('zh-CN');
+      return `<div class="entry">
+        <input type="checkbox" class="delete-check" data-id="${entry.id}" style="display:${deleteMode ? 'inline-block' : 'none'}">
+        <div class="num">${entryNumber}</div>
+        <div class="content">
+          <div class="title"><a href="${entry.url}" target="_blank">${escHtml(entry.title || entry.url)}</a></div>
+          <div class="url">${escHtml(entry.url)}</div>
+          <div class="time">${entryTime}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    renderPagination(page, data.has_more);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    throw error;
+  }
 }
 
 function renderPagination(page, hasMore) {
@@ -138,10 +204,10 @@ function renderPagination(page, hasMore) {
   `;
 }
 
-function goPage(p) {
-  if (p < 1) return;
-  currentPage = p;
-  loadEntries(p, currentQuery).catch(() => {});
+function goPage(nextPage) {
+  if (nextPage < 1 || (nextPage > 1 && !pageCursors.has(nextPage))) return;
+  currentPage = nextPage;
+  loadEntries(nextPage, currentQuery).catch(handleEntriesError);
 }
 
 function toggleDeleteMode() {
@@ -178,7 +244,9 @@ async function confirmDelete() {
   if (failed > 0) alert(`${failed} 条删除失败`);
   deleteMode = false;
   document.getElementById('deleteModeBtn').textContent = '删除';
-  loadEntries(currentPage, currentQuery);
+  pageCursors = new Map([[1, null]]);
+  currentPage = 1;
+  loadEntries(1, currentQuery).catch(handleEntriesError);
   pollLatestID();
 }
 
@@ -190,12 +258,36 @@ function escHtml(s) {
 
 document.getElementById('searchInput').addEventListener('input', function() {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    currentQuery = this.value.trim();
+  const nextQuery = this.value.trim();
+
+  if (nextQuery === '') {
+    applySearchQuery('');
+    return;
+  }
+  if (Array.from(nextQuery).length < MIN_SEARCH_LENGTH) {
+    currentQuery = nextQuery;
     currentPage = 1;
-    loadEntries(currentPage, currentQuery);
-  }, 300);
+    pageCursors = new Map([[1, null]]);
+    if (entriesRequestController) entriesRequestController.abort();
+    document.getElementById('entries').innerHTML = `<div class="empty">请输入至少 ${MIN_SEARCH_LENGTH} 个字符</div>`;
+    document.getElementById('pagination').innerHTML = '';
+    return;
+  }
+
+  searchTimer = setTimeout(() => applySearchQuery(nextQuery), 300);
 });
+
+function applySearchQuery(nextQuery) {
+  currentQuery = nextQuery;
+  currentPage = 1;
+  pageCursors = new Map([[1, null]]);
+  loadEntries(1, currentQuery).catch(handleEntriesError);
+}
+
+function handleEntriesError(error) {
+  if (error.name === 'AbortError' || handleAuthError(error)) return;
+  document.getElementById('entries').innerHTML = `<div class="empty">加载失败：${escHtml(error.message)}</div>`;
+}
 
 // --- 轮询自动刷新 ---
 let knownLatestID = null;
@@ -212,8 +304,10 @@ async function pollLatestID() {
     if (!res.ok) return;
     const data = await res.json();
     const id = data.latest_id;
-    if (knownLatestID !== null && id !== knownLatestID) {
-      loadEntries(currentPage, currentQuery);
+    if (knownLatestID !== null && id !== knownLatestID && currentQuery === '') {
+      pageCursors = new Map([[1, null]]);
+      currentPage = 1;
+      loadEntries(1, '').catch(handleEntriesError);
     }
     knownLatestID = id;
   } catch (e) {

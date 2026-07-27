@@ -33,9 +33,10 @@ func Init(path string, maxEntries int) {
 	if _, err := DB.Exec(entriesDDL); err != nil {
 		log.Fatalf("Failed to create entries table: %v", err)
 	}
-	if _, err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_entries_created_at ON entries(created_at DESC)"); err != nil {
+	if _, err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_entries_created_at_id ON entries(created_at DESC, id DESC)"); err != nil {
 		log.Fatalf("Failed to create entries index: %v", err)
 	}
+	initializeEntriesSearchIndex()
 
 	coursesDDL := `CREATE TABLE IF NOT EXISTS courses (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +65,46 @@ func Init(path string, maxEntries int) {
 	}
 
 	_ = maxEntries
+}
+
+func initializeEntriesSearchIndex() {
+	var searchTableExists bool
+	if err := DB.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'entries_fts')",
+	).Scan(&searchTableExists); err != nil {
+		log.Fatalf("Failed to inspect entries search index: %v", err)
+	}
+
+	statements := []string{
+		`CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+			title,
+			url,
+			content='entries',
+			content_rowid='id',
+			tokenize='trigram case_sensitive 0'
+		)`,
+		`CREATE TRIGGER IF NOT EXISTS entries_fts_after_insert AFTER INSERT ON entries BEGIN
+			INSERT INTO entries_fts(rowid, title, url) VALUES (new.id, new.title, new.url);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS entries_fts_after_delete AFTER DELETE ON entries BEGIN
+			INSERT INTO entries_fts(entries_fts, rowid, title, url) VALUES ('delete', old.id, old.title, old.url);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS entries_fts_after_update AFTER UPDATE ON entries BEGIN
+			INSERT INTO entries_fts(entries_fts, rowid, title, url) VALUES ('delete', old.id, old.title, old.url);
+			INSERT INTO entries_fts(rowid, title, url) VALUES (new.id, new.title, new.url);
+		END`,
+	}
+	for _, statement := range statements {
+		if _, err := DB.Exec(statement); err != nil {
+			log.Fatalf("Failed to initialize entries search index: %v", err)
+		}
+	}
+
+	if !searchTableExists {
+		if _, err := DB.Exec("INSERT INTO entries_fts(entries_fts) VALUES ('rebuild')"); err != nil {
+			log.Fatalf("Failed to rebuild entries search index: %v", err)
+		}
+	}
 }
 
 func EvictOldEntries(maxEntries int) {

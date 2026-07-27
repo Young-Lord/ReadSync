@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"readsync/db"
 	"readsync/models"
@@ -181,36 +182,46 @@ func (h *EntryHandlers) HandlePatchEntryTitle(w http.ResponseWriter, r *http.Req
 }
 
 func HandleGetEntries(w http.ResponseWriter, r *http.Request) {
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	if page < 1 {
-		page = 1
-	}
 	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
 	if perPage < 1 || perPage > 100 {
 		perPage = 20
 	}
 	search := strings.TrimSpace(r.URL.Query().Get("q"))
-
-	var rows *sql.Rows
-	var err error
-	offset := (page - 1) * perPage
-	limit := perPage + 1
-
-	if search != "" {
-		like := "%" + search + "%"
-		rows, err = db.DB.Query(
-			`SELECT id, url, title, created_at FROM entries
-			 WHERE url LIKE ? OR title LIKE ?
-			 ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-			like, like, limit, offset,
-		)
-	} else {
-		rows, err = db.DB.Query(
-			`SELECT id, url, title, created_at FROM entries
-			 ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-			limit, offset,
-		)
+	if search != "" && utf8.RuneCountInString(search) < 3 {
+		http.Error(w, `{"error":"search query must contain at least 3 characters"}`, http.StatusBadRequest)
+		return
 	}
+	cursorCreatedAt := strings.TrimSpace(r.URL.Query().Get("cursor_created_at"))
+	cursorID, cursorError := strconv.ParseInt(r.URL.Query().Get("cursor_id"), 10, 64)
+	hasCursor := cursorCreatedAt != "" || r.URL.Query().Get("cursor_id") != ""
+	if hasCursor && (cursorCreatedAt == "" || cursorError != nil || cursorID < 1) {
+		http.Error(w, `{"error":"invalid cursor"}`, http.StatusBadRequest)
+		return
+	}
+
+	limit := perPage + 1
+	queryArguments := []interface{}{}
+	var queryBuilder strings.Builder
+	queryBuilder.WriteString("SELECT entries.id, entries.url, entries.title, entries.created_at FROM entries")
+
+	conditions := []string{}
+	if search != "" {
+		queryBuilder.WriteString(" JOIN entries_fts ON entries_fts.rowid = entries.id")
+		conditions = append(conditions, "entries_fts MATCH ?")
+		queryArguments = append(queryArguments, buildFTSQuery(search))
+	}
+	if hasCursor {
+		conditions = append(conditions, "(entries.created_at < ? OR (entries.created_at = ? AND entries.id < ?))")
+		queryArguments = append(queryArguments, cursorCreatedAt, cursorCreatedAt, cursorID)
+	}
+	if len(conditions) > 0 {
+		queryBuilder.WriteString(" WHERE ")
+		queryBuilder.WriteString(strings.Join(conditions, " AND "))
+	}
+	queryBuilder.WriteString(" ORDER BY entries.created_at DESC, entries.id DESC LIMIT ?")
+	queryArguments = append(queryArguments, limit)
+
+	rows, err := db.DB.QueryContext(r.Context(), queryBuilder.String(), queryArguments...)
 	if err != nil {
 		http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
 		return
@@ -219,11 +230,16 @@ func HandleGetEntries(w http.ResponseWriter, r *http.Request) {
 
 	entries := []models.Entry{}
 	for rows.Next() {
-		var e models.Entry
-		if err := rows.Scan(&e.ID, &e.URL, &e.Title, &e.CreatedAt); err != nil {
-			continue
+		var entry models.Entry
+		if err := rows.Scan(&entry.ID, &entry.URL, &entry.Title, &entry.CreatedAt); err != nil {
+			http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
+			return
 		}
-		entries = append(entries, e)
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
+		return
 	}
 
 	hasMore := len(entries) > perPage
@@ -231,13 +247,32 @@ func HandleGetEntries(w http.ResponseWriter, r *http.Request) {
 		entries = entries[:perPage]
 	}
 
+	var nextCursor interface{}
+	if hasMore && len(entries) > 0 {
+		lastEntry := entries[len(entries)-1]
+		nextCursor = map[string]interface{}{
+			"created_at": lastEntry.CreatedAt,
+			"id":         lastEntry.ID,
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"entries":  entries,
-		"page":     page,
-		"per_page": perPage,
-		"has_more": hasMore,
+		"entries":     entries,
+		"per_page":    perPage,
+		"has_more":    hasMore,
+		"next_cursor": nextCursor,
 	})
+}
+
+func buildFTSQuery(search string) string {
+	terms := strings.Fields(search)
+	quotedTerms := make([]string, 0, len(terms))
+	for _, term := range terms {
+		escapedTerm := strings.ReplaceAll(term, `"`, `""`)
+		quotedTerms = append(quotedTerms, `"`+escapedTerm+`"*`)
+	}
+	return strings.Join(quotedTerms, " AND ")
 }
 
 func HandleDeleteEntry(w http.ResponseWriter, r *http.Request, idStr string) {
