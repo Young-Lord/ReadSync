@@ -53,13 +53,11 @@ func (s *installTokenStore) generate(scriptContent string) string {
 	return token
 }
 
+// consume 查询令牌对应的预生成脚本内容。token 可多次使用，TTL 过期后由 AfterFunc 清理。
 func (s *installTokenStore) consume(token string) (string, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	content, ok := s.tokens[token]
-	if ok {
-		delete(s.tokens, token)
-	}
 	return content, ok
 }
 
