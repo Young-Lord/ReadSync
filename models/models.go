@@ -22,11 +22,14 @@ type Course struct {
 }
 
 type Config struct {
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	Port           int    `json:"port"`
-	DBPath         string `json:"db_path"`
-	BaseURL        string `json:"base_url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Port     int    `json:"port"`
+	DBPath   string `json:"db_path"`
+	BaseURL  string `json:"base_url"`
+	// Host 部署时必须显式指定的对外访问地址（可含 scheme 与端口，如 "https://read.example.com:8443"）。
+	// 它是用户脚本中服务端地址与 @connect 主机的唯一来源，不做自动推断。
+	Host           string `json:"host"`
 	MaxEntries     int    `json:"max_entries"`
 	DedupeMinutes  int    `json:"dedupe_minutes"`
 	PollIntervalMs int    `json:"poll_interval_ms"`

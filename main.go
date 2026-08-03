@@ -85,6 +85,10 @@ func loadConfig(path string) models.Config {
 	if cfg.PollIntervalMs <= 0 {
 		cfg.PollIntervalMs = 30000
 	}
+	if cfg.Host == "" {
+		log.Fatalf("Failed to load config: host is required. " +
+			"Set \"host\" in config.json to the public address used by browsers (e.g. \"https://read.example.com\").")
+	}
 	return cfg
 }
 
@@ -162,37 +166,44 @@ func makeCourseAPIHandler(apiPrefix string) http.HandlerFunc {
 	}
 }
 
-// generateUserscriptContent 读取模板并用用户凭据填充占位符，返回完整的 .user.js 内容。
-func generateUserscriptContent(user, pass, base string, r *http.Request) (string, error) {
-	template, err := webuiFS.ReadFile("webui/userscript.template.js")
-	if err != nil {
-		return "", err
-	}
-
-	// 确定服务端 URL（考虑反向代理的情况）
+// resolvePublicEndpoint 计算用户脚本中的服务端地址（SERVER_URL）与 @connect 主机。
+// host 的唯一来源是部署配置 config.Host（支持 "host"、"host:port"、"scheme://host:port" 等格式），
+// 不做任何请求级自动推断。
+func resolvePublicEndpoint(cfgHost, base string) (serverURL, connectHost string) {
 	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
+	host := cfgHost
+	if idx := strings.Index(host, "://"); idx != -1 {
+		scheme = host[:idx]
+		host = host[idx+3:]
 	}
-	if fwd := r.Header.Get("X-Forwarded-Proto"); fwd == "https" || fwd == "https,http" {
-		scheme = "https"
-	}
-	serverURL := fmt.Sprintf("%s://%s%s", scheme, r.Host, strings.TrimSuffix(base, "/"))
+	host = strings.Trim(host, "/")
+	return fmt.Sprintf("%s://%s%s", scheme, host, strings.TrimSuffix(base, "/")), stripPort(host)
+}
 
-	// 提取 hostname（去掉端口）用于 @connect
-	host := r.Host
+// stripPort 去掉 host 中的端口部分并移除 IPv6 括号，用于 @connect 指令。
+func stripPort(host string) string {
 	if colonIdx := strings.LastIndex(host, ":"); colonIdx != -1 {
 		portStr := host[colonIdx+1:]
 		if _, err := strconv.Atoi(portStr); err == nil {
 			host = host[:colonIdx]
 		}
 	}
-	host = strings.Trim(host, "[]")
+	return strings.Trim(host, "[]")
+}
+
+// generateUserscriptContent 读取模板并用用户凭据填充占位符，返回完整的 .user.js 内容。
+func generateUserscriptContent(user, pass, base, cfgHost string) (string, error) {
+	template, err := webuiFS.ReadFile("webui/userscript.template.js")
+	if err != nil {
+		return "", err
+	}
+
+	serverURL, connectHost := resolvePublicEndpoint(cfgHost, base)
 
 	authToken := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
 
 	content := string(template)
-	content = strings.ReplaceAll(content, "<!--CONNECT_HOST-->", host)
+	content = strings.ReplaceAll(content, "<!--CONNECT_HOST-->", connectHost)
 	content = strings.ReplaceAll(content, "<!--SERVER_URL-->", serverURL)
 	content = strings.ReplaceAll(content, "<!--AUTH_TOKEN-->", authToken)
 	return content, nil
@@ -200,11 +211,11 @@ func generateUserscriptContent(user, pass, base string, r *http.Request) (string
 
 // makeUserscriptHandler 生成动态用户脚本。
 // Basic Auth → 实时生成。?token=xxx → 从令牌存储中取出预生成内容。
-func makeUserscriptHandler(base string) http.HandlerFunc {
+func makeUserscriptHandler(base, cfgHost string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
 		if ok {
-			content, err := generateUserscriptContent(user, pass, base, r)
+			content, err := generateUserscriptContent(user, pass, base, cfgHost)
 			if err != nil {
 				http.Error(w, "Internal error", http.StatusInternalServerError)
 				return
@@ -230,7 +241,7 @@ func makeUserscriptHandler(base string) http.HandlerFunc {
 
 // makeInstallTokenHandler 处理 POST /token 请求。
 // 已在 AuthMiddleware 中通过 Basic Auth 验证，此处预生成完整脚本并存入令牌存储。
-func makeInstallTokenHandler(base string) http.HandlerFunc {
+func makeInstallTokenHandler(base, cfgHost string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
@@ -241,7 +252,7 @@ func makeInstallTokenHandler(base string) http.HandlerFunc {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		content, err := generateUserscriptContent(user, pass, base, r)
+		content, err := generateUserscriptContent(user, pass, base, cfgHost)
 		if err != nil {
 			http.Error(w, "Internal error", http.StatusInternalServerError)
 			return
@@ -288,11 +299,11 @@ func main() {
 
 	// 用户脚本安装路由 — 无需 AuthMiddleware，处理器内自行判断 Basic Auth 或 ?token=
 	userscriptPrefix := base + "/userscript.user.js"
-	mux.HandleFunc(userscriptPrefix, makeUserscriptHandler(base))
+	mux.HandleFunc(userscriptPrefix, makeUserscriptHandler(base, config.Host))
 
 	// 安装令牌 API — AuthMiddleware 保护，只允许 POST
 	tokenAPIPrefix := base + "/api/v1/userscript/token"
-	authTokenAPI := handlers.AuthMiddleware(makeInstallTokenHandler(base), config.Username, config.Password)
+	authTokenAPI := handlers.AuthMiddleware(makeInstallTokenHandler(base, config.Host), config.Username, config.Password)
 	mux.HandleFunc(tokenAPIPrefix, authTokenAPI)
 
 	webPrefix := base + "/"

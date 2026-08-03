@@ -30,6 +30,7 @@ cp config.example.json config.json
   "port": 8080,
   "db_path": "data.db",
   "base_url": "",
+  "host": "http://localhost:8080",
   "max_entries": 100000,
   "dedupe_minutes": 10,
   "poll_interval_ms": 30000
@@ -43,6 +44,7 @@ cp config.example.json config.json
 | `port` | Server listen port | `8080` |
 | `db_path` | SQLite database file path | `data.db` |
 | `base_url` | URL path prefix (e.g. `/readsync`) for reverse proxy | `""` |
+| `host` | Public address used by browsers, the **only** source for the generated userscript's `@connect` and `SERVER` (e.g. `https://read.example.com` or `read.example.com:8443`) | (required) |
 | `max_entries` | Maximum number of entries to keep | `100000` |
 | `dedupe_minutes` | Time window (in minutes) for deduplication | `10` |
 | `poll_interval_ms` | Web UI polling interval in milliseconds | `30000` |
@@ -78,6 +80,17 @@ If you run ReadSync behind a reverse proxy (e.g. Nginx), set `base_url` in your 
 ```
 
 Then proxy requests to `http://localhost:8080/readsync/`.
+
+When the reverse proxy rewrites the `Host` header (or does not forward `X-Forwarded-Proto`), the generated userscript may point at the internal address. `host` must always be set explicitly to the public address used by browsers — it is the **only** source of the server address in the generated userscript:
+
+```json
+{
+  "base_url": "/readsync",
+  "host": "https://read.example.com"
+}
+```
+
+`host` accepts `host`, `host:port`, or `scheme://host:port` formats. The server refuses to start without it. It only affects the generated userscript (`@connect` and `SERVER`); the web UI and API always work through whatever address you use to reach the server.
 
 ## API
 
