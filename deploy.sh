@@ -26,6 +26,21 @@ die()  { printf '\033[1;31m[deploy] 错误：\033[0m %s\n' "$*" >&2; exit 1; }
 
 ssh_cmd() { ssh "${SSH_OPTS[@]}" "$SSH_HOST" "$@"; }
 
+# 轮询等待 nssm 服务进入目标状态，超时返回非零。
+wait_for_service_state() {
+  local expected_state="$1"
+  local timeout_sec="${2:-60}"
+  local deadline=$((SECONDS + timeout_sec))
+  local status=""
+  while ((SECONDS < deadline)); do
+    status="$(ssh_cmd "nssm status ${SERVICE_NAME}" 2>/dev/null || true)"
+    [[ "$status" == *"$expected_state"* ]] && return 0
+    sleep 3
+  done
+  printf '超时：服务状态为 %s，期望 %s\n' "${status:-未知}" "$expected_state" >&2
+  return 1
+}
+
 # ---------- 1. 可选：提交 ----------
 if [[ $# -ge 1 && -n "$1" ]]; then
   git add -A
@@ -78,9 +93,8 @@ ssh_cmd "echo ok" >/dev/null 2>&1 || die "无法连接 ${SSH_HOST}"
 
 info "停止服务 ${SERVICE_NAME} ..."
 if ! ssh_cmd "nssm stop ${SERVICE_NAME}"; then
-  STATUS="$(ssh_cmd "nssm status ${SERVICE_NAME}" 2>/dev/null || true)"
-  [[ "$STATUS" == *SERVICE_STOPPED* ]] || die "停止服务失败：${STATUS:-未知状态}"
-  info "服务本就处于停止状态"
+  info "服务停止中，等待进入停止状态 ..."
+  wait_for_service_state SERVICE_STOPPED 60 || die "停止服务失败"
 fi
 
 info "上传并覆盖 ${REMOTE_EXE_PATH} ..."
@@ -88,9 +102,9 @@ scp -q "$TMP_EXE" "${SSH_HOST}:${REMOTE_EXE_PATH}"
 
 info "启动服务 ${SERVICE_NAME} ..."
 if ! ssh_cmd "nssm start ${SERVICE_NAME}"; then
-  STATUS="$(ssh_cmd "nssm status ${SERVICE_NAME}" 2>/dev/null || true)"
-  [[ "$STATUS" == *SERVICE_RUNNING* ]] || die "启动服务失败：${STATUS:-未知状态}"
-  info "服务已在运行"
+  # nssm start 在服务启动较慢时返回 SERVICE_START_PENDING 并退出非零，需等待真正进入运行状态
+  info "服务启动中（SERVICE_START_PENDING），等待进入运行状态 ..."
+  wait_for_service_state SERVICE_RUNNING 60 || die "启动服务失败"
 fi
 
 info "部署完成"
