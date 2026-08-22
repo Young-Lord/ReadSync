@@ -61,9 +61,10 @@ Or download a pre-built binary from [Releases](https://github.com/Young-Lord/Rea
 ### 3. Install the Userscript
 
 1. Install [Tampermonkey](https://www.tampermonkey.net/) or [Greasemonkey](https://www.greasespot.net/) in your browser.
-2. Copy `ReadSync.example.user.js` to `ReadSync.user.js`.
-3. Edit `SERVER` and `AUTH` in the script to match your server address and credentials.
-4. Install the script in your userscript manager.
+2. Open the Web UI and log in.
+3. Click **安装脚本** (Install Script) in the header and confirm the installation in your userscript manager.
+
+The script is generated on the fly from `webui/userscript.template.js` with your credentials and the configured `host`, so no manual editing is required.
 
 ### 4. Access the Web UI
 

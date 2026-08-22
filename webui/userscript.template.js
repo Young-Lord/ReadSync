@@ -8,6 +8,7 @@
 // @grant        GM_xmlhttpRequest
 // @connect      <!--CONNECT_HOST-->
 // @run-at       document-idle
+// @noframes
 // ==/UserScript==
 
 (function() {
