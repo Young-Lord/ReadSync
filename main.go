@@ -79,6 +79,12 @@ func loadConfig(path string) models.Config {
 	if cfg.MaxEntries <= 0 {
 		cfg.MaxEntries = 100000
 	}
+	if cfg.HotEntries <= 0 {
+		cfg.HotEntries = 2000
+	}
+	if cfg.HotEntries > cfg.MaxEntries {
+		cfg.HotEntries = cfg.MaxEntries
+	}
 	if cfg.DedupeMinutes <= 0 {
 		cfg.DedupeMinutes = 10
 	}
@@ -116,6 +122,10 @@ func makeEntryAPIHandler(apiPrefix string, entryH *handlers.EntryHandlers) http.
 		}
 		if r.Method == http.MethodGet && path == "" {
 			handlers.HandleGetEntries(w, r)
+			return
+		}
+		if r.Method == http.MethodGet && path == "search" {
+			handlers.HandleSearchEntries(w, r)
 			return
 		}
 		if r.Method == http.MethodGet && path == "latest-id" {
@@ -272,6 +282,7 @@ func main() {
 	entryH := &handlers.EntryHandlers{
 		DedupeMinutes: config.DedupeMinutes,
 		MaxEntries:    config.MaxEntries,
+		HotEntries:    config.HotEntries,
 	}
 
 	mux := http.NewServeMux()

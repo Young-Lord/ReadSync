@@ -3,7 +3,6 @@ package db
 import (
 	"database/sql"
 	"log"
-	"math"
 	"regexp"
 	"sync/atomic"
 	"time"
@@ -37,6 +36,22 @@ func Init(path string, maxEntries int) {
 		log.Fatalf("Failed to create entries index: %v", err)
 	}
 	initializeEntriesSearchIndex()
+
+	// 慢表：最近 HotEntries 条之外的数据自动搬移到这里，保持热表轻量。
+	// id 不做自增，直接沿用热表搬移过来的原 id。
+	slowEntriesDDL := `CREATE TABLE IF NOT EXISTS slow_entries (
+		id INTEGER PRIMARY KEY,
+		url TEXT NOT NULL,
+		title TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	)`
+	if _, err := DB.Exec(slowEntriesDDL); err != nil {
+		log.Fatalf("Failed to create slow_entries table: %v", err)
+	}
+	if _, err := DB.Exec("CREATE INDEX IF NOT EXISTS idx_slow_entries_created_at_id ON slow_entries(created_at DESC, id DESC)"); err != nil {
+		log.Fatalf("Failed to create slow entries index: %v", err)
+	}
+	initializeSlowEntriesSearchIndex()
 
 	coursesDDL := `CREATE TABLE IF NOT EXISTS courses (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,14 +122,44 @@ func initializeEntriesSearchIndex() {
 	}
 }
 
-func EvictOldEntries(maxEntries int) {
-	var count int
-	DB.QueryRow("SELECT COUNT(*) FROM entries").Scan(&count)
-	if count < maxEntries {
-		return
+func initializeSlowEntriesSearchIndex() {
+	var searchTableExists bool
+	if err := DB.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'slow_entries_fts')",
+	).Scan(&searchTableExists); err != nil {
+		log.Fatalf("Failed to inspect slow entries search index: %v", err)
 	}
-	deleteCount := int(math.Max(1, float64(maxEntries)*0.05))
-	DB.Exec("DELETE FROM entries WHERE id IN (SELECT id FROM entries ORDER BY created_at ASC LIMIT ?)", deleteCount)
+
+	statements := []string{
+		`CREATE VIRTUAL TABLE IF NOT EXISTS slow_entries_fts USING fts5(
+			title,
+			url,
+			content='slow_entries',
+			content_rowid='id',
+			tokenize='trigram case_sensitive 0'
+		)`,
+		`CREATE TRIGGER IF NOT EXISTS slow_entries_fts_after_insert AFTER INSERT ON slow_entries BEGIN
+			INSERT INTO slow_entries_fts(rowid, title, url) VALUES (new.id, new.title, new.url);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS slow_entries_fts_after_delete AFTER DELETE ON slow_entries BEGIN
+			INSERT INTO slow_entries_fts(slow_entries_fts, rowid, title, url) VALUES ('delete', old.id, old.title, old.url);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS slow_entries_fts_after_update AFTER UPDATE ON slow_entries BEGIN
+			INSERT INTO slow_entries_fts(slow_entries_fts, rowid, title, url) VALUES ('delete', old.id, old.title, old.url);
+			INSERT INTO slow_entries_fts(rowid, title, url) VALUES (new.id, new.title, new.url);
+		END`,
+	}
+	for _, statement := range statements {
+		if _, err := DB.Exec(statement); err != nil {
+			log.Fatalf("Failed to initialize slow entries search index: %v", err)
+		}
+	}
+
+	if !searchTableExists {
+		if _, err := DB.Exec("INSERT INTO slow_entries_fts(slow_entries_fts) VALUES ('rebuild')"); err != nil {
+			log.Fatalf("Failed to rebuild slow entries search index: %v", err)
+		}
+	}
 }
 
 func UpdateLatestEntryID() {

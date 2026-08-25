@@ -5,8 +5,8 @@ let searchTimer = null;
 let entriesRequestController = null;
 let entriesRequestSequence = 0;
 let pageCursors = new Map([[1, null]]);
-const MIN_SEARCH_LENGTH = 3;
 let deleteMode = false;
+let globalSearchMode = false;
 
 function showLogin() {
   document.getElementById('loginOverlay').style.display = 'flex';
@@ -146,6 +146,7 @@ document.getElementById('loginPass').addEventListener('keydown', (e) => {
 document.getElementById('installScriptBtn').addEventListener('click', openScriptInstall);
 document.getElementById('directInstallBtn').addEventListener('click', directInstallScript);
 document.getElementById('copyScriptLinkBtn').addEventListener('click', copyScriptLink);
+document.getElementById('globalSearchBtn').addEventListener('click', toggleGlobalSearch);
 
 async function apiFetch(url, opts = {}) {
   const headers = opts.headers || {};
@@ -175,15 +176,23 @@ async function loadEntries(page, query) {
   const entriesElement = document.getElementById('entries');
   entriesElement.innerHTML = '<div class="loading">加载中...</div>';
 
+  if (globalSearchMode && !query) {
+    entriesElement.innerHTML = '<div class="empty">输入关键词可搜索全部历史（含已归档条目）</div>';
+    renderPagination(1, false);
+    return;
+  }
+
   const parameters = new URLSearchParams({ per_page: '20' });
   if (query) parameters.set('q', query);
   if (cursor) {
     parameters.set('cursor_created_at', cursor.created_at);
     parameters.set('cursor_id', String(cursor.id));
+    if (cursor.source) parameters.set('cursor_source', cursor.source);
   }
 
+  const endpoint = globalSearchMode ? `${API}/search` : API;
   try {
-    const data = await apiFetch(`${API}?${parameters}`, { signal: entriesRequestController.signal });
+    const data = await apiFetch(`${endpoint}?${parameters}`, { signal: entriesRequestController.signal });
     if (requestSequence !== entriesRequestSequence) return;
 
     if (!data.entries || data.entries.length === 0) {
@@ -198,11 +207,13 @@ async function loadEntries(page, query) {
     entriesElement.innerHTML = data.entries.map((entry, index) => {
       const entryNumber = (page - 1) * 20 + index + 1;
       const entryTime = new Date(entry.created_at).toLocaleString('zh-CN');
+      const sourceBadge = globalSearchMode && entry.source === 'slow'
+        ? '<span class="source-badge">归档</span>' : '';
       return `<div class="entry">
         <input type="checkbox" class="delete-check" data-id="${entry.id}" style="display:${deleteMode ? 'inline-block' : 'none'}">
         <div class="num">${entryNumber}</div>
         <div class="content">
-          <div class="title"><a href="${entry.url}" target="_blank">${escHtml(entry.title || entry.url)}</a></div>
+          <div class="title">${sourceBadge}<a href="${entry.url}" target="_blank">${escHtml(entry.title || entry.url)}</a></div>
           <div class="url">${escHtml(entry.url)}</div>
           <div class="time">${entryTime}</div>
         </div>
@@ -242,6 +253,19 @@ function toggleDeleteMode() {
     btn.textContent = '删除';
     checks.forEach(c => { c.style.display = 'none'; c.checked = false; });
   }
+}
+
+// 全局搜索模式：搜索热表 + 慢表（含已归档条目）；再点一次回到最近列表。
+function toggleGlobalSearch() {
+  globalSearchMode = !globalSearchMode;
+  const btn = document.getElementById('globalSearchBtn');
+  btn.classList.toggle('active', globalSearchMode);
+  btn.textContent = globalSearchMode ? '返回最近' : '全局搜索';
+  currentQuery = '';
+  currentPage = 1;
+  pageCursors = new Map([[1, null]]);
+  document.getElementById('searchInput').value = '';
+  loadEntries(1, '').catch(handleEntriesError);
 }
 
 async function confirmDelete() {
@@ -285,15 +309,6 @@ document.getElementById('searchInput').addEventListener('input', function() {
     applySearchQuery('');
     return;
   }
-  if (Array.from(nextQuery).length < MIN_SEARCH_LENGTH) {
-    currentQuery = nextQuery;
-    currentPage = 1;
-    pageCursors = new Map([[1, null]]);
-    if (entriesRequestController) entriesRequestController.abort();
-    document.getElementById('entries').innerHTML = `<div class="empty">请输入至少 ${MIN_SEARCH_LENGTH} 个字符</div>`;
-    document.getElementById('pagination').innerHTML = '';
-    return;
-  }
 
   searchTimer = setTimeout(() => applySearchQuery(nextQuery), 300);
 });
@@ -325,7 +340,7 @@ async function pollLatestID() {
     if (!res.ok) return;
     const data = await res.json();
     const id = data.latest_id;
-    if (knownLatestID !== null && id !== knownLatestID && currentQuery === '') {
+    if (knownLatestID !== null && id !== knownLatestID && currentQuery === '' && !globalSearchMode) {
       pageCursors = new Map([[1, null]]);
       currentPage = 1;
       loadEntries(1, '').catch(handleEntriesError);

@@ -76,6 +76,21 @@ button.danger:hover { background: #c82333; }
 }
 .pagination button { min-width: 80px; }
 .pagination span { font-size: 14px; color: #666; }
+.bottom-bar {
+  display: flex; align-items: center; margin-top: 16px; gap: 12px;
+}
+.bottom-bar .pagination { flex: 1; margin-top: 0; }
+.ghost-btn {
+  background: transparent; border: 1px solid #1a73e8; color: #1a73e8;
+  white-space: nowrap;
+}
+.ghost-btn:hover { background: rgba(26, 115, 232, 0.08); }
+.ghost-btn.active { background: #1a73e8; color: #fff; }
+.source-badge {
+  display: inline-block; font-size: 11px; color: #666;
+  background: #eee; border-radius: 3px; padding: 1px 6px; margin-right: 6px;
+  vertical-align: middle; font-weight: 400;
+}
 .empty { text-align: center; padding: 40px; color: #999; }
 .loading { text-align: center; padding: 40px; color: #999; }
 
@@ -90,6 +105,10 @@ button.danger:hover { background: #c82333; }
   .entry .num { color: #666; }
   .entry .time { color: #666; }
   .pagination span { color: #999; }
+  .ghost-btn { border-color: #64b5f6; color: #64b5f6; }
+  .ghost-btn:hover { background: rgba(100, 181, 246, 0.1); }
+  .ghost-btn.active { background: #64b5f6; color: #1a1a2e; }
+  .source-badge { background: #2a2a4a; color: #999; }
   .modal-box { background: #16213e; }
   .modal-desc a { color: #64b5f6; }
   .modal-desc { color: #ccc; }

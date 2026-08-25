@@ -9,6 +9,8 @@ A self-hosted browsing history synchronization tool. It consists of a Go backend
 - Live page title tracking: title changes are synced and refresh the current entry (visible via auto-refresh)
 - Deduplication: same URL within a configurable time window is not recorded again
 - Full-text search on URL and title
+- Hot/cold storage: the most recent `hot_entries` (default 2000) stay in a fast table; older entries are automatically archived to a slow table
+- Global search across the full archive (fast + slow tables)
 - Paginated browsing history with auto-refresh polling
 - Dark mode support (follows system preference)
 - Single binary deployment, no CGO required
@@ -32,6 +34,7 @@ cp config.example.json config.json
   "base_url": "",
   "host": "http://localhost:8080",
   "max_entries": 100000,
+  "hot_entries": 2000,
   "dedupe_minutes": 10,
   "poll_interval_ms": 30000
 }
@@ -45,7 +48,8 @@ cp config.example.json config.json
 | `db_path` | SQLite database file path | `data.db` |
 | `base_url` | URL path prefix (e.g. `/readsync`) for reverse proxy | `""` |
 | `host` | Public address used by browsers, the **only** source for the generated userscript's `@connect` and `SERVER` (e.g. `https://read.example.com` or `read.example.com:8443`) | (required) |
-| `max_entries` | Maximum number of entries to keep | `100000` |
+| `max_entries` | Global maximum number of entries (fast + slow tables) to keep | `100000` |
+| `hot_entries` | Number of recent entries kept in the fast table; older entries are moved to the slow table automatically | `2000` |
 | `dedupe_minutes` | Time window (in minutes) for deduplication | `10` |
 | `poll_interval_ms` | Web UI polling interval in milliseconds | `30000` |
 
@@ -101,7 +105,8 @@ All endpoints require HTTP Basic Auth.
 |---|---|---|
 | `POST` | `/api/v1/entry` | Create a new entry (`{"url": "...", "title": "..."}`) |
 | `PATCH` | `/api/v1/entry` | Report a title change (`{"url": "...", "title": "..."}`); if the latest entry has this URL its title is updated and `latest-id` advances (so the UI refreshes), otherwise a new entry is inserted |
-| `GET` | `/api/v1/entry?page=1&per_page=20&q=keyword` | List entries (paginated, searchable) |
+| `GET` | `/api/v1/entry?page=1&per_page=20&q=keyword` | List entries from the fast table (paginated, searchable) |
+| `GET` | `/api/v1/entry/search?q=keyword&per_page=20` | Search across the full archive (fast + slow tables); each entry carries a `source` field (`hot`/`slow`), cursor pagination uses `cursor_created_at` + `cursor_id` + `cursor_source` |
 | `DELETE` | `/api/v1/entry/{id}` | Delete an entry by ID |
 | `GET` | `/api/v1/entry/latest-id` | Get the latest entry ID (used for polling) |
 

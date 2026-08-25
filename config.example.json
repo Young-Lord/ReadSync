@@ -6,6 +6,7 @@
   "base_url": "",
   "host": "http://localhost:8080",
   "max_entries": 100000,
+  "hot_entries": 2000,
   "dedupe_minutes": 10,
   "poll_interval_ms": 30000
 }
